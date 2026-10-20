@@ -1,33 +1,55 @@
-import pandas as pd
-from sklearn.cluster import KMeans
 import sys
 
-def segment_customers(csv_file):
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+FEATURE_COLUMNS = ["total_spent", "visits"]
+
+
+def segment_customers(csv_file, n_clusters=3):
     try:
         df = pd.read_csv(csv_file)
+        missing = set(FEATURE_COLUMNS).difference(df.columns)
+        if missing:
+            raise ValueError(f"CSV must include: {', '.join(sorted(missing))}")
+        if not isinstance(n_clusters, int) or n_clusters < 2:
+            raise ValueError("n_clusters must be an integer greater than or equal to 2.")
 
-        if not {"total_spent", "visits"}.issubset(df.columns):
-            print("❌ CSV must include 'total_spent' and 'visits' columns.")
-            return
+        df = df.copy()
+        for column in FEATURE_COLUMNS:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+        features = df[FEATURE_COLUMNS]
+        if df.empty or features.isna().any().any():
+            raise ValueError("Customer features must be numeric and non-empty.")
+        if not np.isfinite(features.to_numpy(dtype=float)).all():
+            raise ValueError("Customer features must be finite numbers.")
+        if len(df) < n_clusters:
+            raise ValueError(f"At least {n_clusters} customers are required.")
+        if len(features.drop_duplicates()) < n_clusters:
+            raise ValueError(f"At least {n_clusters} distinct customer profiles are required.")
 
-        X = df[["total_spent", "visits"]]
+        scaled_features = StandardScaler().fit_transform(features)
+        model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        df["segment"] = model.fit_predict(scaled_features)
 
-        kmeans = KMeans(n_clusters=3, random_state=42)
-        df["segment"] = kmeans.fit_predict(X)
-
+        columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment"]
         print("\n===== Customer Segmentation Results =====")
-        print(df[["customer_id", "total_spent", "visits", "segment"]])
+        print(df[columns].to_string(index=False))
         print("=========================================\n")
+        return df
+    except (OSError, pd.errors.ParserError, ValueError) as exc:
+        print(f"❌ Error: {exc}")
+        return None
 
-    except Exception as e:
-        print(f"❌ Error: {e}")
 
 def main():
     if len(sys.argv) != 2:
         print("Usage: python segment.py <csv_file>")
-        return
+        return 2
+    return 0 if segment_customers(sys.argv[1]) is not None else 1
 
-    segment_customers(sys.argv[1])
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,20 +1,17 @@
 # Customer Segmentation AI
 
-A machine learning project that performs customer segmentation using K-Means clustering.  
-This tool separates customers based on their transaction patterns or engagement metrics, helping businesses make data-driven decisions.
+A K-Means clustering tool that groups customers using spending and visit frequency.
 
----
+## Features
+- Reads customer records from CSV
+- Standardizes spending and visit features before clustering so currency scale does not dominate
+- Uses deterministic K-Means initialization for reproducible runs
+- Rejects missing, non-numeric, non-finite, or insufficient customer profiles
 
-## 📊 Features
-- Groups customers into segments (default: 3 clusters)
-- Reads data from CSV file
-- Identifies high-value / low-value / moderate customers
-- Outputs segmentation results with cluster labels
+## Input CSV
+Required columns: `total_spent` and `visits`. An optional `customer_id` column is included in output.
 
----
-
-## 🧪 Example CSV Format
-```
+```csv
 customer_id,total_spent,visits
 1,15000,10
 2,5000,5
@@ -23,44 +20,14 @@ customer_id,total_spent,visits
 5,9500,7
 ```
 
----
+At least three distinct customer profiles are needed for the default three clusters.
 
-## 🚀 Usage
-
-### 1. Clone repository
-```bash
-git clone https://github.com/Shashwat-Aneja/customer-segmentation-ai
-cd customer-segmentation-ai
-```
-
-### 2. Install dependencies
+## Run
 ```bash
 pip install pandas scikit-learn
-```
-
-### 3. Run
-```bash
 python segment.py data.csv
 ```
 
----
+Cluster numbers are identifiers, not ranked customer-value labels. Inspect each cluster's feature profile before assigning business meaning.
 
-## 📁 Structure
-```
-customer-segmentation-ai/
-│
-├── segment.py
-└── README.md
-```
-
----
-
-## 📌 Future Enhancements
-- Visualize clusters using matplotlib
-- Add more features (average purchase value, last purchase date)
-- Export segmentation results as JSON or CSV
-- Integrate with AI Business Assistant
-
----
-
-Built by **Shashwat Aneja**
+Developed by **Shashwat Aneja**.

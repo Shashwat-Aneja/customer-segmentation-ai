@@ -31,5 +31,26 @@ class CustomerSegmentationTests(unittest.TestCase):
         self.assertIsNone(segment_customers(path, n_clusters=2))
 
 
+    def test_segment_summary_aggregates_size_and_behavior(self):
+        import pandas as pd
+        from segment import summarize_segments
+
+        frame = pd.DataFrame({
+            "total_spent": [10, 30, 100],
+            "visits": [1, 3, 10],
+            "segment": [0, 0, 1],
+        })
+        summary = summarize_segments(frame).set_index("segment")
+        self.assertEqual(summary.loc[0, "customer_count"], 2)
+        self.assertAlmostEqual(summary.loc[0, "average_spend"], 20.0)
+        self.assertAlmostEqual(summary.loc[1, "average_visits"], 10.0)
+
+    def test_segment_summary_requires_segment_labels(self):
+        import pandas as pd
+        from segment import summarize_segments
+
+        with self.assertRaisesRegex(ValueError, "segment"):
+            summarize_segments(pd.DataFrame({"total_spent": [10], "visits": [1]}))
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,25 @@ from sklearn.preprocessing import StandardScaler
 FEATURE_COLUMNS = ["total_spent", "visits"]
 
 
+def summarize_segments(df):
+    """Summarize cluster sizes and average customer behavior by segment."""
+    required = set(FEATURE_COLUMNS + ["segment"])
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(f"DataFrame must include: {', '.join(sorted(missing))}")
+    summary = (
+        df.groupby("segment", as_index=False)
+        .agg(
+            customer_count=("segment", "size"),
+            average_spend=("total_spent", "mean"),
+            average_visits=("visits", "mean"),
+        )
+        .sort_values("segment")
+        .reset_index(drop=True)
+    )
+    return summary
+
+
 def segment_customers(csv_file, n_clusters=3):
     try:
         df = pd.read_csv(csv_file)

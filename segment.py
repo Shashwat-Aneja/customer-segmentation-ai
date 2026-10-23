@@ -56,6 +56,8 @@ def segment_customers(csv_file, n_clusters=3):
         columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment"]
         print("\n===== Customer Segmentation Results =====")
         print(df[columns].to_string(index=False))
+        print("\nSegment profiles:")
+        print(summarize_segments(df).to_string(index=False))
         print("=========================================\n")
         return df
     except (OSError, pd.errors.ParserError, ValueError) as exc:

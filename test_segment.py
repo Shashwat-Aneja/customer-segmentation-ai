@@ -22,6 +22,14 @@ class CustomerSegmentationTests(unittest.TestCase):
         self.assertIn("segment", result.columns)
         self.assertEqual(result["segment"].nunique(), 3)
 
+    def test_segmentation_prints_segment_profiles(self, capsys):
+        path = self.csv_path(
+            "total_spent,visits\n10,1\n12,2\n100,8\n120,9\n500,20\n"
+        )
+        result = segment_customers(path, n_clusters=3)
+        assert result is not None
+        assert "Segment profiles:" in capsys.readouterr().out
+
     def test_insufficient_distinct_profiles_are_rejected(self):
         path = self.csv_path("total_spent,visits\n10,1\n10,1\n10,1\n")
         self.assertIsNone(segment_customers(path, n_clusters=3))

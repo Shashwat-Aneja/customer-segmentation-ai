@@ -24,7 +24,36 @@ def summarize_segments(df):
         .sort_values("segment")
         .reset_index(drop=True)
     )
+    if "segment_name" in df.columns:
+        names = df.drop_duplicates("segment").set_index("segment")["segment_name"]
+        summary.insert(1, "segment_name", summary["segment"].map(names))
     return summary
+
+
+def assign_segment_names(df):
+    """Attach stable spend-ranked names while retaining original cluster IDs."""
+    summary = summarize_segments(df)
+    ranked_segments = summary.sort_values(
+        ["average_spend", "average_visits", "segment"]
+    )["segment"].tolist()
+
+    if len(ranked_segments) == 2:
+        names = {ranked_segments[0]: "Lower Spend", ranked_segments[1]: "Higher Spend"}
+    elif len(ranked_segments) == 3:
+        names = {
+            ranked_segments[0]: "Low Spend",
+            ranked_segments[1]: "Mid Spend",
+            ranked_segments[2]: "High Spend",
+        }
+    else:
+        names = {
+            segment: f"Spend Tier {rank + 1}"
+            for rank, segment in enumerate(ranked_segments)
+        }
+
+    named = df.copy()
+    named["segment_name"] = named["segment"].map(names)
+    return named
 
 
 def segment_customers(csv_file, n_clusters=3):
@@ -52,8 +81,9 @@ def segment_customers(csv_file, n_clusters=3):
         scaled_features = StandardScaler().fit_transform(features)
         model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         df["segment"] = model.fit_predict(scaled_features)
+        df = assign_segment_names(df)
 
-        columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment"]
+        columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment", "segment_name"]
         print("\n===== Customer Segmentation Results =====")
         print(df[columns].to_string(index=False))
         print("\nSegment profiles:")

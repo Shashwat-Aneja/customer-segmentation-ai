@@ -1,4 +1,4 @@
-import sys
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -95,11 +95,17 @@ def segment_customers(csv_file, n_clusters=3):
         return None
 
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python segment.py <csv_file>")
-        return 2
-    return 0 if segment_customers(sys.argv[1]) is not None else 1
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Segment customers from a CSV file.")
+    parser.add_argument("csv_file", help="CSV containing total_spent and visits columns")
+    parser.add_argument(
+        "--clusters",
+        type=int,
+        default=3,
+        help="Number of customer segments to create (default: 3)",
+    )
+    args = parser.parse_args(argv)
+    return 0 if segment_customers(args.csv_file, n_clusters=args.clusters) is not None else 1
 
 
 if __name__ == "__main__":

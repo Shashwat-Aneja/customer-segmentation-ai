@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from segment import segment_customers
+from segment import main, segment_customers
 
 
 class CustomerSegmentationTests(unittest.TestCase):
@@ -43,7 +43,6 @@ class CustomerSegmentationTests(unittest.TestCase):
     def test_non_numeric_features_are_rejected(self):
         path = self.csv_path("total_spent,visits\n10,1\ninvalid,2\n30,3\n")
         self.assertIsNone(segment_customers(path, n_clusters=2))
-
 
     def test_segment_summary_aggregates_size_and_behavior(self):
         import pandas as pd
@@ -95,6 +94,13 @@ class CustomerSegmentationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "segment"):
             summarize_segments(pd.DataFrame({"total_spent": [10], "visits": [1]}))
+
+    def test_cli_accepts_custom_cluster_count(self):
+        path = self.csv_path(
+            "total_spent,visits\n10,1\n12,2\n100,8\n120,9\n500,20\n"
+        )
+        self.assertEqual(main([path, "--clusters", "2"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

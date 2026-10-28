@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -114,8 +115,10 @@ def main(argv=None):
     if result is None:
         return 1
     if args.output:
+        output_path = Path(args.output).expanduser()
         try:
-            result.to_csv(args.output, index=False)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            result.to_csv(output_path, index=False)
         except OSError as exc:
             print(f"❌ Could not write segmentation CSV: {exc}")
             return 1

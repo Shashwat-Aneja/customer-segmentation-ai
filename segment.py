@@ -104,8 +104,22 @@ def main(argv=None):
         default=3,
         help="Number of customer segments to create (default: 3)",
     )
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Optional CSV path for customer-level segment assignments",
+    )
     args = parser.parse_args(argv)
-    return 0 if segment_customers(args.csv_file, n_clusters=args.clusters) is not None else 1
+    result = segment_customers(args.csv_file, n_clusters=args.clusters)
+    if result is None:
+        return 1
+    if args.output:
+        try:
+            result.to_csv(args.output, index=False)
+        except OSError as exc:
+            print(f"❌ Could not write segmentation CSV: {exc}")
+            return 1
+    return 0
 
 
 if __name__ == "__main__":

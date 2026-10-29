@@ -111,11 +111,16 @@ def main(argv=None):
         help="Optional CSV path for customer-level segment assignments",
     )
     args = parser.parse_args(argv)
+    source_path = Path(args.csv_file).expanduser().resolve()
+    output_path = Path(args.output).expanduser().resolve() if args.output else None
+    if output_path is not None and output_path == source_path:
+        print("❌ Output CSV must be different from the source file.")
+        return 1
+
     result = segment_customers(args.csv_file, n_clusters=args.clusters)
     if result is None:
         return 1
-    if args.output:
-        output_path = Path(args.output).expanduser()
+    if output_path is not None:
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             result.to_csv(output_path, index=False)

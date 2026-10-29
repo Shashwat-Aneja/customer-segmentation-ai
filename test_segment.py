@@ -95,6 +95,22 @@ class CustomerSegmentationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "segment"):
             summarize_segments(pd.DataFrame({"total_spent": [10], "visits": [1]}))
 
+    def test_cli_refuses_to_overwrite_source_csv(self):
+        path = self.csv_path(
+            "total_spent,visits\n10,1\n12,2\n100,8\n120,9\n500,20\n"
+        )
+        original = Path(path).read_bytes()
+
+        from contextlib import redirect_stdout
+        from io import StringIO
+        output = StringIO()
+        with redirect_stdout(output):
+            result = main([path, "--output", path])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(Path(path).read_bytes(), original)
+        self.assertIn("different from the source file", output.getvalue())
+
     def test_cli_accepts_custom_cluster_count(self):
         path = self.csv_path(
             "total_spent,visits\n10,1\n12,2\n100,8\n120,9\n500,20\n"

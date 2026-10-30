@@ -35,6 +35,7 @@ class CustomerSegmentationTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Segment profiles:", output.getvalue())
         self.assertIn("segment_name", result.columns)
+        self.assertIn("Silhouette score:", output.getvalue())
 
     def test_insufficient_distinct_profiles_are_rejected(self):
         path = self.csv_path("total_spent,visits\n10,1\n10,1\n10,1\n")
@@ -116,6 +117,24 @@ class CustomerSegmentationTests(unittest.TestCase):
             "total_spent,visits\n10,1\n12,2\n100,8\n120,9\n500,20\n"
         )
         self.assertEqual(main([path, "--clusters", "2"]), 0)
+
+    def test_silhouette_score_is_high_for_separated_customer_groups(self):
+        import numpy as np
+        from segment import segmentation_silhouette_score
+
+        features = np.array([[0.0, 0.0], [0.1, 0.1], [10.0, 10.0], [10.1, 10.1]])
+        score = segmentation_silhouette_score(features, [0, 0, 1, 1])
+
+        self.assertIsNotNone(score)
+        self.assertGreater(score, 0.9)
+
+    def test_silhouette_score_is_unavailable_for_undefined_cluster_shapes(self):
+        import numpy as np
+        from segment import segmentation_silhouette_score
+
+        features = np.array([[0.0], [1.0], [2.0]])
+        self.assertIsNone(segmentation_silhouette_score(features, [0, 0, 0]))
+        self.assertIsNone(segmentation_silhouette_score(features, [0, 1, 2]))
 
 
 if __name__ == "__main__":

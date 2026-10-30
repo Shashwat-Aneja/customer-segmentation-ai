@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
 FEATURE_COLUMNS = ["total_spent", "visits"]
@@ -57,6 +58,21 @@ def assign_segment_names(df):
     return named
 
 
+def segmentation_silhouette_score(features, labels):
+    """Return a silhouette score when the cluster labels make it mathematically defined."""
+    values = np.asarray(features, dtype=float)
+    assignments = np.asarray(labels)
+    if values.ndim != 2 or assignments.ndim != 1 or len(values) != len(assignments):
+        raise ValueError("Features must be a 2D array aligned with one-dimensional cluster labels.")
+    if not np.isfinite(values).all():
+        raise ValueError("Silhouette features must contain only finite values.")
+
+    cluster_count = np.unique(assignments).size
+    if cluster_count < 2 or cluster_count >= len(assignments):
+        return None
+    return float(silhouette_score(values, assignments))
+
+
 def segment_customers(csv_file, n_clusters=3):
     try:
         df = pd.read_csv(csv_file)
@@ -81,14 +97,21 @@ def segment_customers(csv_file, n_clusters=3):
 
         scaled_features = StandardScaler().fit_transform(features)
         model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        df["segment"] = model.fit_predict(scaled_features)
+        labels = model.fit_predict(scaled_features)
+        df["segment"] = labels
         df = assign_segment_names(df)
+        quality_score = segmentation_silhouette_score(scaled_features, labels)
+        df.attrs["silhouette_score"] = quality_score
 
         columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment", "segment_name"]
         print("\n===== Customer Segmentation Results =====")
         print(df[columns].to_string(index=False))
         print("\nSegment profiles:")
         print(summarize_segments(df).to_string(index=False))
+        if quality_score is None:
+            print("\nSilhouette score: unavailable for the resulting cluster labels")
+        else:
+            print(f"\nSilhouette score: {quality_score:.3f}")
         print("=========================================\n")
         return df
     except (OSError, pd.errors.ParserError, ValueError) as exc:

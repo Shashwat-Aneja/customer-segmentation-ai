@@ -45,6 +45,12 @@ class CustomerSegmentationTests(unittest.TestCase):
         path = self.csv_path("total_spent,visits\n10,1\ninvalid,2\n30,3\n")
         self.assertIsNone(segment_customers(path, n_clusters=2))
 
+    def test_negative_visit_counts_are_rejected(self):
+        path = self.csv_path(
+            "total_spent,visits\\n10,1\\n12,-2\\n100,8\\n120,9\\n500,20\\n"
+        )
+        self.assertIsNone(segment_customers(path, n_clusters=3))
+
     def test_segment_summary_aggregates_size_and_behavior(self):
         import pandas as pd
         from segment import summarize_segments

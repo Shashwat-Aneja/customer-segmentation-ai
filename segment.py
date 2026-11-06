@@ -1,4 +1,6 @@
 import argparse
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -121,6 +123,27 @@ def segment_customers(csv_file, n_clusters=3):
         return None
 
 
+
+def export_segments_csv_atomic(result, output_path):
+    """Write a complete segmentation export before replacing the destination."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f".{output_path.name}.",
+        suffix=".tmp",
+        dir=str(output_path.parent),
+    )
+    os.close(descriptor)
+
+    try:
+        result.to_csv(temporary_path, index=False)
+        os.replace(temporary_path, output_path)
+    finally:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Segment customers from a CSV file.")
     parser.add_argument("csv_file", help="CSV containing total_spent and visits columns")
@@ -147,8 +170,7 @@ def main(argv=None):
         return 1
     if output_path is not None:
         try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            result.to_csv(output_path, index=False)
+            export_segments_csv_atomic(result, output_path)
         except OSError as exc:
             print(f"❌ Could not write segmentation CSV: {exc}")
             return 1

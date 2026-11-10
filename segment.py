@@ -92,6 +92,8 @@ def segment_customers(csv_file, n_clusters=3):
             raise ValueError("Customer features must be numeric and non-empty.")
         if not np.isfinite(features.to_numpy(dtype=float)).all():
             raise ValueError("Customer features must be finite numbers.")
+        if (features["total_spent"] < 0).any():
+            raise ValueError("Customer spending must be non-negative.")
         if (features["visits"] < 0).any():
             raise ValueError("Customer visits must be non-negative.")
         if len(df) < n_clusters:

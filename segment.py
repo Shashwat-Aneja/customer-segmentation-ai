@@ -163,9 +163,16 @@ def main(argv=None):
     args = parser.parse_args(argv)
     source_path = Path(args.csv_file).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve() if args.output else None
-    if output_path is not None and output_path == source_path:
-        print("❌ Output CSV must be different from the source file.")
-        return 1
+    if output_path is not None:
+        same_file = output_path == source_path
+        if not same_file and output_path.exists():
+            try:
+                same_file = output_path.samefile(source_path)
+            except OSError:
+                same_file = True
+        if same_file:
+            print("❌ Output CSV must be different from the source file.")
+            return 1
 
     result = segment_customers(args.csv_file, n_clusters=args.clusters)
     if result is None:

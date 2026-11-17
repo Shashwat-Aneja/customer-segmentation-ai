@@ -31,3 +31,5 @@ python segment.py data.csv
 Cluster numbers are identifiers, not ranked customer-value labels. Inspect each cluster's feature profile before assigning business meaning.
 
 Developed by **Shashwat Aneja**.
+
+`--summary-output segments.json` saves segment sizes, average behavior and silhouette score in an atomic JSON report. The summary cannot overwrite either the source CSV or customer-level export.

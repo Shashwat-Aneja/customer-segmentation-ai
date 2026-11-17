@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -148,6 +149,24 @@ def export_segments_csv_atomic(result, output_path):
         except FileNotFoundError:
             pass
 
+def export_segment_summary(result, output_path):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"segments": summarize_segments(result).to_dict(orient="records"),
+               "silhouette_score": result.attrs.get("silhouette_score")}
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output_path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, allow_nan=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, output_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Segment customers from a CSV file.")
     parser.add_argument("csv_file", help="CSV containing total_spent and visits columns")
@@ -162,6 +181,7 @@ def main(argv=None):
         "-o",
         help="Optional CSV path for customer-level segment assignments",
     )
+    parser.add_argument("--summary-output", help="Atomically export segment profiles and silhouette score as JSON")
     args = parser.parse_args(argv)
     source_path = Path(args.csv_file).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve() if args.output else None
@@ -176,6 +196,12 @@ def main(argv=None):
             print("❌ Output CSV must be different from the source file.")
             return 1
 
+    summary_path = Path(args.summary_output).expanduser().resolve() if args.summary_output else None
+    if summary_path is not None:
+        protected = [source_path] + ([output_path] if output_path is not None else [])
+        if any(summary_path == path or (summary_path.exists() and path.exists() and summary_path.samefile(path)) for path in protected):
+            print("❌ Summary output must differ from the source and customer export.")
+            return 1
     result = segment_customers(args.csv_file, n_clusters=args.clusters)
     if result is None:
         return 1
@@ -184,6 +210,12 @@ def main(argv=None):
             export_segments_csv_atomic(result, output_path)
         except OSError as exc:
             print(f"❌ Could not write segmentation CSV: {exc}")
+            return 1
+    if summary_path is not None:
+        try:
+            export_segment_summary(result, summary_path)
+        except (OSError, ValueError) as exc:
+            print(f"❌ Could not write segment summary: {exc}")
             return 1
     return 0
 

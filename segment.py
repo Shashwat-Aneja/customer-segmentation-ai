@@ -76,7 +76,26 @@ def segmentation_silhouette_score(features, labels):
     return float(silhouette_score(values, assignments))
 
 
-def segment_customers(csv_file, n_clusters=3):
+def select_cluster_count(features, max_clusters=6):
+    """Select a bounded candidate count using silhouette quality on scaled features."""
+    if not isinstance(max_clusters, int) or isinstance(max_clusters, bool) or not 2 <= max_clusters <= 10:
+        raise ValueError("max_clusters must be an integer from 2 to 10.")
+    values = StandardScaler().fit_transform(features)
+    upper = min(max_clusters, len(features) - 1, len(features.drop_duplicates()))
+    if upper < 2:
+        raise ValueError("Automatic selection requires at least three rows and two distinct profiles.")
+    best_count, best_score = None, -float("inf")
+    for count in range(2, upper + 1):
+        labels = KMeans(n_clusters=count, random_state=42, n_init=10).fit_predict(values)
+        score = segmentation_silhouette_score(values, labels)
+        if score is not None and score > best_score:
+            best_count, best_score = count, score
+    if best_count is None:
+        raise ValueError("No usable automatic segmentation was found.")
+    return best_count
+
+
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False):
     try:
         df = pd.read_csv(csv_file)
         missing = set(FEATURE_COLUMNS).difference(df.columns)
@@ -99,6 +118,8 @@ def segment_customers(csv_file, n_clusters=3):
             features["visits"], np.floor(features["visits"])
         ).all():
             raise ValueError("Customer visits must be non-negative whole numbers.")
+        if auto_clusters:
+            n_clusters = select_cluster_count(features)
         if len(df) < n_clusters:
             raise ValueError(f"At least {n_clusters} customers are required.")
         if len(features.drop_duplicates()) < n_clusters:
@@ -111,6 +132,7 @@ def segment_customers(csv_file, n_clusters=3):
         df = assign_segment_names(df)
         quality_score = segmentation_silhouette_score(scaled_features, labels)
         df.attrs["silhouette_score"] = quality_score
+        df.attrs["cluster_count"] = n_clusters
 
         columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment", "segment_name"]
         print("\n===== Customer Segmentation Results =====")
@@ -170,7 +192,8 @@ def export_segment_summary(result, output_path):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Segment customers from a CSV file.")
     parser.add_argument("csv_file", help="CSV containing total_spent and visits columns")
-    parser.add_argument(
+    cluster_group = parser.add_mutually_exclusive_group()
+    cluster_group.add_argument(
         "--clusters",
         type=int,
         default=3,
@@ -182,6 +205,7 @@ def main(argv=None):
         help="Optional CSV path for customer-level segment assignments",
     )
     parser.add_argument("--summary-output", help="Atomically export segment profiles and silhouette score as JSON")
+    cluster_group.add_argument("--auto-clusters", action="store_true", help="Select 2–6 clusters by silhouette score")
     args = parser.parse_args(argv)
     source_path = Path(args.csv_file).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve() if args.output else None
@@ -202,7 +226,8 @@ def main(argv=None):
         if any(summary_path == path or (summary_path.exists() and path.exists() and summary_path.samefile(path)) for path in protected):
             print("❌ Summary output must differ from the source and customer export.")
             return 1
-    result = segment_customers(args.csv_file, n_clusters=args.clusters)
+    options = {"auto_clusters": True} if args.auto_clusters else {}
+    result = segment_customers(args.csv_file, n_clusters=args.clusters, **options)
     if result is None:
         return 1
     if output_path is not None:

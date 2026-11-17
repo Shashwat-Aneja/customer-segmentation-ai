@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -75,7 +76,26 @@ def segmentation_silhouette_score(features, labels):
     return float(silhouette_score(values, assignments))
 
 
-def segment_customers(csv_file, n_clusters=3):
+def select_cluster_count(features, max_clusters=6):
+    """Select a bounded candidate count using silhouette quality on scaled features."""
+    if not isinstance(max_clusters, int) or isinstance(max_clusters, bool) or not 2 <= max_clusters <= 10:
+        raise ValueError("max_clusters must be an integer from 2 to 10.")
+    values = StandardScaler().fit_transform(features)
+    upper = min(max_clusters, len(features) - 1, len(features.drop_duplicates()))
+    if upper < 2:
+        raise ValueError("Automatic selection requires at least three rows and two distinct profiles.")
+    best_count, best_score = None, -float("inf")
+    for count in range(2, upper + 1):
+        labels = KMeans(n_clusters=count, random_state=42, n_init=10).fit_predict(values)
+        score = segmentation_silhouette_score(values, labels)
+        if score is not None and score > best_score:
+            best_count, best_score = count, score
+    if best_count is None:
+        raise ValueError("No usable automatic segmentation was found.")
+    return best_count
+
+
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False):
     try:
         df = pd.read_csv(csv_file)
         missing = set(FEATURE_COLUMNS).difference(df.columns)
@@ -94,8 +114,12 @@ def segment_customers(csv_file, n_clusters=3):
             raise ValueError("Customer features must be finite numbers.")
         if (features["total_spent"] < 0).any():
             raise ValueError("Customer spending must be non-negative.")
-        if (features["visits"] < 0).any():
-            raise ValueError("Customer visits must be non-negative.")
+        if (features["visits"] < 0).any() or not np.equal(
+            features["visits"], np.floor(features["visits"])
+        ).all():
+            raise ValueError("Customer visits must be non-negative whole numbers.")
+        if auto_clusters:
+            n_clusters = select_cluster_count(features)
         if len(df) < n_clusters:
             raise ValueError(f"At least {n_clusters} customers are required.")
         if len(features.drop_duplicates()) < n_clusters:
@@ -108,6 +132,7 @@ def segment_customers(csv_file, n_clusters=3):
         df = assign_segment_names(df)
         quality_score = segmentation_silhouette_score(scaled_features, labels)
         df.attrs["silhouette_score"] = quality_score
+        df.attrs["cluster_count"] = n_clusters
 
         columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment", "segment_name"]
         print("\n===== Customer Segmentation Results =====")
@@ -146,10 +171,29 @@ def export_segments_csv_atomic(result, output_path):
         except FileNotFoundError:
             pass
 
+def export_segment_summary(result, output_path):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"segments": summarize_segments(result).to_dict(orient="records"),
+               "silhouette_score": result.attrs.get("silhouette_score")}
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output_path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, allow_nan=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, output_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Segment customers from a CSV file.")
     parser.add_argument("csv_file", help="CSV containing total_spent and visits columns")
-    parser.add_argument(
+    cluster_group = parser.add_mutually_exclusive_group()
+    cluster_group.add_argument(
         "--clusters",
         type=int,
         default=3,
@@ -160,14 +204,30 @@ def main(argv=None):
         "-o",
         help="Optional CSV path for customer-level segment assignments",
     )
+    parser.add_argument("--summary-output", help="Atomically export segment profiles and silhouette score as JSON")
+    cluster_group.add_argument("--auto-clusters", action="store_true", help="Select 2–6 clusters by silhouette score")
     args = parser.parse_args(argv)
     source_path = Path(args.csv_file).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve() if args.output else None
-    if output_path is not None and output_path == source_path:
-        print("❌ Output CSV must be different from the source file.")
-        return 1
+    if output_path is not None:
+        same_file = output_path == source_path
+        if not same_file and output_path.exists():
+            try:
+                same_file = output_path.samefile(source_path)
+            except OSError:
+                same_file = True
+        if same_file:
+            print("❌ Output CSV must be different from the source file.")
+            return 1
 
-    result = segment_customers(args.csv_file, n_clusters=args.clusters)
+    summary_path = Path(args.summary_output).expanduser().resolve() if args.summary_output else None
+    if summary_path is not None:
+        protected = [source_path] + ([output_path] if output_path is not None else [])
+        if any(summary_path == path or (summary_path.exists() and path.exists() and summary_path.samefile(path)) for path in protected):
+            print("❌ Summary output must differ from the source and customer export.")
+            return 1
+    options = {"auto_clusters": True} if args.auto_clusters else {}
+    result = segment_customers(args.csv_file, n_clusters=args.clusters, **options)
     if result is None:
         return 1
     if output_path is not None:
@@ -175,6 +235,12 @@ def main(argv=None):
             export_segments_csv_atomic(result, output_path)
         except OSError as exc:
             print(f"❌ Could not write segmentation CSV: {exc}")
+            return 1
+    if summary_path is not None:
+        try:
+            export_segment_summary(result, summary_path)
+        except (OSError, ValueError) as exc:
+            print(f"❌ Could not write segment summary: {exc}")
             return 1
     return 0
 

@@ -61,7 +61,7 @@ def assign_segment_names(df):
     return named
 
 
-def segmentation_silhouette_score(features, labels):
+def segmentation_silhouette_score(features, labels, max_samples=2000):
     """Return a silhouette score when the cluster labels make it mathematically defined."""
     values = np.asarray(features, dtype=float)
     assignments = np.asarray(labels)
@@ -73,6 +73,14 @@ def segmentation_silhouette_score(features, labels):
     cluster_count = np.unique(assignments).size
     if cluster_count < 2 or cluster_count >= len(assignments):
         return None
+    if not isinstance(max_samples, int) or isinstance(max_samples, bool) or max_samples < cluster_count + 1:
+        raise ValueError("max_samples must allow at least one sample per cluster plus one.")
+    if len(assignments) > max_samples:
+        generator = np.random.default_rng(42)
+        representatives = np.array([generator.choice(np.flatnonzero(assignments == label)) for label in np.unique(assignments)])
+        remaining = np.setdiff1d(np.arange(len(assignments)), representatives)
+        sampled = np.concatenate([representatives, generator.choice(remaining, max_samples - cluster_count, replace=False)])
+        values, assignments = values[sampled], assignments[sampled]
     return float(silhouette_score(values, assignments))
 
 

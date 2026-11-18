@@ -35,3 +35,5 @@ Developed by **Shashwat Aneja**.
 `--summary-output segments.json` saves segment sizes, average behavior and silhouette score in an atomic JSON report. The summary cannot overwrite either the source CSV or customer-level export.
 
 Use `--auto-clusters` instead of `--clusters` to evaluate 2–6 feasible cluster counts on standardized features and choose the highest silhouette score. Selection is deterministic, bounded, and requires at least three rows and two distinct profiles.
+
+Silhouette evaluation deterministically samples at most 2,000 customers while including each cluster. Large customer files no longer require all-pairs scoring for every candidate cluster count; quality values for large files are sample estimates.

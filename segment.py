@@ -103,8 +103,10 @@ def select_cluster_count(features, max_clusters=6):
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20):
     try:
+        if not isinstance(max_display_rows, int) or isinstance(max_display_rows, bool) or max_display_rows < 1:
+            raise ValueError("max_display_rows must be a positive integer.")
         df = pd.read_csv(csv_file)
         missing = set(FEATURE_COLUMNS).difference(df.columns)
         if missing:
@@ -144,7 +146,9 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False):
 
         columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment", "segment_name"]
         print("\n===== Customer Segmentation Results =====")
-        print(df[columns].to_string(index=False))
+        print(df[columns].head(max_display_rows).to_string(index=False))
+        if len(df) > max_display_rows:
+            print(f"Showing {max_display_rows} of {len(df)} customers; summaries and exports include every row.")
         print("\nSegment profiles:")
         print(summarize_segments(df).to_string(index=False))
         if quality_score is None:
@@ -214,6 +218,7 @@ def main(argv=None):
     )
     parser.add_argument("--summary-output", help="Atomically export segment profiles and silhouette score as JSON")
     cluster_group.add_argument("--auto-clusters", action="store_true", help="Select 2–6 clusters by silhouette score")
+    parser.add_argument("--max-display-rows", type=int, default=20, help="Maximum customer rows printed; exports remain complete")
     args = parser.parse_args(argv)
     source_path = Path(args.csv_file).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve() if args.output else None
@@ -235,6 +240,7 @@ def main(argv=None):
             print("❌ Summary output must differ from the source and customer export.")
             return 1
     options = {"auto_clusters": True} if args.auto_clusters else {}
+    options["max_display_rows"] = args.max_display_rows
     result = segment_customers(args.csv_file, n_clusters=args.clusters, **options)
     if result is None:
         return 1

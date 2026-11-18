@@ -37,3 +37,5 @@ Developed by **Shashwat Aneja**.
 Use `--auto-clusters` instead of `--clusters` to evaluate 2–6 feasible cluster counts on standardized features and choose the highest silhouette score. Selection is deterministic, bounded, and requires at least three rows and two distinct profiles.
 
 Silhouette evaluation deterministically samples at most 2,000 customers while including each cluster. Large customer files no longer require all-pairs scoring for every candidate cluster count; quality values for large files are sample estimates.
+
+Console customer previews default to 20 rows, configurable with `--max-display-rows`. Model fitting, profiles and CSV exports still include all customers.

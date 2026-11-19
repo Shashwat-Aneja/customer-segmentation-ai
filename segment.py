@@ -1,4 +1,5 @@
 import argparse
+import math
 import json
 import os
 import tempfile
@@ -13,6 +14,14 @@ from sklearn.preprocessing import StandardScaler
 FEATURE_COLUMNS = ["total_spent", "visits"]
 
 
+def _stable_group_mean(values):
+    numbers = np.asarray(values, dtype=float)
+    if not np.isfinite(numbers).all():
+        raise ValueError("Segment summaries require finite numeric features.")
+    scale = float(np.max(np.abs(numbers))) if numbers.size else 0.0
+    return scale * (math.fsum(float(value) for value in numbers / scale) / len(numbers)) if scale else 0.0
+
+
 def summarize_segments(df):
     """Summarize cluster sizes and average customer behavior by segment."""
     required = set(FEATURE_COLUMNS + ["segment"])
@@ -23,8 +32,8 @@ def summarize_segments(df):
         df.groupby("segment", as_index=False)
         .agg(
             customer_count=("segment", "size"),
-            average_spend=("total_spent", "mean"),
-            average_visits=("visits", "mean"),
+            average_spend=("total_spent", _stable_group_mean),
+            average_visits=("visits", _stable_group_mean),
         )
         .sort_values("segment")
         .reset_index(drop=True)

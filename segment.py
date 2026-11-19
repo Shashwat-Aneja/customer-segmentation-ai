@@ -1,4 +1,5 @@
 import argparse
+import math
 import json
 import os
 import tempfile
@@ -13,6 +14,14 @@ from sklearn.preprocessing import StandardScaler
 FEATURE_COLUMNS = ["total_spent", "visits"]
 
 
+def _stable_group_mean(values):
+    numbers = np.asarray(values, dtype=float)
+    if not np.isfinite(numbers).all():
+        raise ValueError("Segment summaries require finite numeric features.")
+    scale = float(np.max(np.abs(numbers))) if numbers.size else 0.0
+    return scale * (math.fsum(float(value) for value in numbers / scale) / len(numbers)) if scale else 0.0
+
+
 def summarize_segments(df):
     """Summarize cluster sizes and average customer behavior by segment."""
     required = set(FEATURE_COLUMNS + ["segment"])
@@ -23,8 +32,8 @@ def summarize_segments(df):
         df.groupby("segment", as_index=False)
         .agg(
             customer_count=("segment", "size"),
-            average_spend=("total_spent", "mean"),
-            average_visits=("visits", "mean"),
+            average_spend=("total_spent", _stable_group_mean),
+            average_visits=("visits", _stable_group_mean),
         )
         .sort_values("segment")
         .reset_index(drop=True)
@@ -114,6 +123,8 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         if not isinstance(n_clusters, int) or n_clusters < 2:
             raise ValueError("n_clusters must be an integer greater than or equal to 2.")
 
+        if df[FEATURE_COLUMNS].apply(lambda column: column.map(lambda value: isinstance(value, (bool, np.bool_)))).any().any():
+            raise ValueError("Customer features must be numeric, not booleans.")
         df = df.copy()
         for column in FEATURE_COLUMNS:
             df[column] = pd.to_numeric(df[column], errors="coerce")

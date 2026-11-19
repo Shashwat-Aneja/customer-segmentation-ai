@@ -114,6 +114,8 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         if not isinstance(n_clusters, int) or n_clusters < 2:
             raise ValueError("n_clusters must be an integer greater than or equal to 2.")
 
+        if df[FEATURE_COLUMNS].apply(lambda column: column.map(lambda value: isinstance(value, (bool, np.bool_)))).any().any():
+            raise ValueError("Customer features must be numeric, not booleans.")
         df = df.copy()
         for column in FEATURE_COLUMNS:
             df[column] = pd.to_numeric(df[column], errors="coerce")

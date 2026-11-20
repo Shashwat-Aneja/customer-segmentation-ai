@@ -248,25 +248,29 @@ def main(argv=None):
     cluster_group.add_argument("--auto-clusters", action="store_true", help="Select 2–6 clusters by silhouette score")
     parser.add_argument("--max-display-rows", type=int, default=20, help="Maximum customer rows printed; exports remain complete")
     args = parser.parse_args(argv)
-    source_path = Path(args.csv_file).expanduser().resolve()
-    output_path = Path(args.output).expanduser().resolve() if args.output else None
-    if output_path is not None:
-        same_file = output_path == source_path
-        if not same_file and output_path.exists():
-            try:
-                same_file = output_path.samefile(source_path)
-            except OSError:
-                same_file = True
-        if same_file:
-            print("❌ Output CSV must be different from the source file.")
-            return 1
-
-    summary_path = Path(args.summary_output).expanduser().resolve() if args.summary_output else None
-    if summary_path is not None:
-        protected = [source_path] + ([output_path] if output_path is not None else [])
-        if any(summary_path == path or (summary_path.exists() and path.exists() and summary_path.samefile(path)) for path in protected):
-            print("❌ Summary output must differ from the source and customer export.")
-            return 1
+    try:
+        source_path = Path(args.csv_file).expanduser().resolve()
+        output_path = Path(args.output).expanduser().resolve() if args.output else None
+        if output_path is not None:
+            same_file = output_path == source_path
+            if not same_file and output_path.exists():
+                try:
+                    same_file = output_path.samefile(source_path)
+                except OSError:
+                    same_file = True
+            if same_file:
+                print("❌ Output CSV must be different from the source file.")
+                return 1
+    
+        summary_path = Path(args.summary_output).expanduser().resolve() if args.summary_output else None
+        if summary_path is not None:
+            protected = [source_path] + ([output_path] if output_path is not None else [])
+            if any(summary_path == path or (summary_path.exists() and path.exists() and summary_path.samefile(path)) for path in protected):
+                print("❌ Summary output must differ from the source and customer export.")
+                return 1
+    except (OSError, RuntimeError) as exc:
+        print(f"❌ Could not validate export paths: {exc}")
+        return 1
     options = {"auto_clusters": True} if args.auto_clusters else {}
     options["max_display_rows"] = args.max_display_rows
     result = segment_customers(args.csv_file, n_clusters=args.clusters, **options)

@@ -103,11 +103,17 @@ def segmentation_silhouette_score(features, labels, max_samples=2000):
     return float(silhouette_score(values, assignments))
 
 
+def scale_customer_features(features):
+    """Normalize magnitude before centering so finite values cannot overflow."""
+    scale = features.abs().max().replace(0, 1.0)
+    return StandardScaler().fit_transform(features / scale)
+
+
 def select_cluster_count(features, max_clusters=6):
     """Select a bounded candidate count using silhouette quality on scaled features."""
     if not isinstance(max_clusters, int) or isinstance(max_clusters, bool) or not 2 <= max_clusters <= 10:
         raise ValueError("max_clusters must be an integer from 2 to 10.")
-    values = StandardScaler().fit_transform(features)
+    values = scale_customer_features(features)
     upper = min(max_clusters, len(features) - 1, len(features.drop_duplicates()))
     if upper < 2:
         raise ValueError("Automatic selection requires at least three rows and two distinct profiles.")
@@ -157,7 +163,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         if len(features.drop_duplicates()) < n_clusters:
             raise ValueError(f"At least {n_clusters} distinct customer profiles are required.")
 
-        scaled_features = StandardScaler().fit_transform(features)
+        scaled_features = scale_customer_features(features)
         model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         labels = model.fit_predict(scaled_features)
         df["segment"] = labels

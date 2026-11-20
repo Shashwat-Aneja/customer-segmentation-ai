@@ -1,3 +1,4 @@
+import csv
 import argparse
 import math
 import json
@@ -12,6 +13,15 @@ from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
 FEATURE_COLUMNS = ["total_spent", "visits"]
+
+
+def _reject_duplicate_headers(csv_file):
+    """Do not let pandas silently rename ambiguous source CSV columns."""
+    if isinstance(csv_file, (str, os.PathLike)) and Path(csv_file).is_file():
+        with open(csv_file, encoding="utf-8-sig", newline="") as source:
+            headers = next(csv.reader(source), [])
+        if len(headers) != len(set(headers)):
+            raise ValueError("CSV column names must be unique; duplicate headers are ambiguous.")
 
 
 def _stable_group_mean(values):
@@ -93,11 +103,17 @@ def segmentation_silhouette_score(features, labels, max_samples=2000):
     return float(silhouette_score(values, assignments))
 
 
+def scale_customer_features(features):
+    """Normalize magnitude before centering so finite values cannot overflow."""
+    scale = features.abs().max().replace(0, 1.0)
+    return StandardScaler().fit_transform(features / scale)
+
+
 def select_cluster_count(features, max_clusters=6):
     """Select a bounded candidate count using silhouette quality on scaled features."""
     if not isinstance(max_clusters, int) or isinstance(max_clusters, bool) or not 2 <= max_clusters <= 10:
         raise ValueError("max_clusters must be an integer from 2 to 10.")
-    values = StandardScaler().fit_transform(features)
+    values = scale_customer_features(features)
     upper = min(max_clusters, len(features) - 1, len(features.drop_duplicates()))
     if upper < 2:
         raise ValueError("Automatic selection requires at least three rows and two distinct profiles.")
@@ -117,6 +133,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         if not isinstance(max_display_rows, int) or isinstance(max_display_rows, bool) or max_display_rows < 1:
             raise ValueError("max_display_rows must be a positive integer.")
         df = pd.read_csv(csv_file)
+        _reject_duplicate_headers(csv_file)
         missing = set(FEATURE_COLUMNS).difference(df.columns)
         if missing:
             raise ValueError(f"CSV must include: {', '.join(sorted(missing))}")
@@ -146,7 +163,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         if len(features.drop_duplicates()) < n_clusters:
             raise ValueError(f"At least {n_clusters} distinct customer profiles are required.")
 
-        scaled_features = StandardScaler().fit_transform(features)
+        scaled_features = scale_customer_features(features)
         model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         labels = model.fit_predict(scaled_features)
         df["segment"] = labels
@@ -231,25 +248,29 @@ def main(argv=None):
     cluster_group.add_argument("--auto-clusters", action="store_true", help="Select 2–6 clusters by silhouette score")
     parser.add_argument("--max-display-rows", type=int, default=20, help="Maximum customer rows printed; exports remain complete")
     args = parser.parse_args(argv)
-    source_path = Path(args.csv_file).expanduser().resolve()
-    output_path = Path(args.output).expanduser().resolve() if args.output else None
-    if output_path is not None:
-        same_file = output_path == source_path
-        if not same_file and output_path.exists():
-            try:
-                same_file = output_path.samefile(source_path)
-            except OSError:
-                same_file = True
-        if same_file:
-            print("❌ Output CSV must be different from the source file.")
-            return 1
-
-    summary_path = Path(args.summary_output).expanduser().resolve() if args.summary_output else None
-    if summary_path is not None:
-        protected = [source_path] + ([output_path] if output_path is not None else [])
-        if any(summary_path == path or (summary_path.exists() and path.exists() and summary_path.samefile(path)) for path in protected):
-            print("❌ Summary output must differ from the source and customer export.")
-            return 1
+    try:
+        source_path = Path(args.csv_file).expanduser().resolve()
+        output_path = Path(args.output).expanduser().resolve() if args.output else None
+        if output_path is not None:
+            same_file = output_path == source_path
+            if not same_file and output_path.exists():
+                try:
+                    same_file = output_path.samefile(source_path)
+                except OSError:
+                    same_file = True
+            if same_file:
+                print("❌ Output CSV must be different from the source file.")
+                return 1
+    
+        summary_path = Path(args.summary_output).expanduser().resolve() if args.summary_output else None
+        if summary_path is not None:
+            protected = [source_path] + ([output_path] if output_path is not None else [])
+            if any(summary_path == path or (summary_path.exists() and path.exists() and summary_path.samefile(path)) for path in protected):
+                print("❌ Summary output must differ from the source and customer export.")
+                return 1
+    except (OSError, RuntimeError) as exc:
+        print(f"❌ Could not validate export paths: {exc}")
+        return 1
     options = {"auto_clusters": True} if args.auto_clusters else {}
     options["max_display_rows"] = args.max_display_rows
     result = segment_customers(args.csv_file, n_clusters=args.clusters, **options)

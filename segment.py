@@ -1,3 +1,4 @@
+import csv
 import argparse
 import math
 import json
@@ -12,6 +13,15 @@ from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
 FEATURE_COLUMNS = ["total_spent", "visits"]
+
+
+def _reject_duplicate_headers(csv_file):
+    """Do not let pandas silently rename ambiguous source CSV columns."""
+    if isinstance(csv_file, (str, os.PathLike)) and Path(csv_file).is_file():
+        with open(csv_file, encoding="utf-8-sig", newline="") as source:
+            headers = next(csv.reader(source), [])
+        if len(headers) != len(set(headers)):
+            raise ValueError("CSV column names must be unique; duplicate headers are ambiguous.")
 
 
 def _stable_group_mean(values):
@@ -117,6 +127,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         if not isinstance(max_display_rows, int) or isinstance(max_display_rows, bool) or max_display_rows < 1:
             raise ValueError("max_display_rows must be a positive integer.")
         df = pd.read_csv(csv_file)
+        _reject_duplicate_headers(csv_file)
         missing = set(FEATURE_COLUMNS).difference(df.columns)
         if missing:
             raise ValueError(f"CSV must include: {', '.join(sorted(missing))}")

@@ -15,6 +15,15 @@ from sklearn.preprocessing import StandardScaler
 FEATURE_COLUMNS = ["total_spent", "visits"]
 
 
+def escape_csv_formulas(frame):
+    """Escape formula-like text in a copy; leave numeric cells unchanged."""
+    def escape(value):
+        if isinstance(value, str) and value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+            return "'" + value
+        return value
+    return frame.apply(lambda column: column.map(escape))
+
+
 def _reject_duplicate_headers(csv_file):
     """Do not let pandas silently rename ambiguous source CSV columns."""
     if isinstance(csv_file, (str, os.PathLike)) and Path(csv_file).is_file():
@@ -191,7 +200,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
 
 
 
-def export_segments_csv_atomic(result, output_path):
+def export_segments_csv_atomic(result, output_path, escape_formulas=False):
     """Write a complete segmentation export before replacing the destination."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,7 +212,8 @@ def export_segments_csv_atomic(result, output_path):
     os.close(descriptor)
 
     try:
-        result.to_csv(temporary_path, index=False)
+        export = escape_csv_formulas(result) if escape_formulas else result
+        export.to_csv(temporary_path, index=False)
         os.replace(temporary_path, output_path)
     finally:
         try:
@@ -247,6 +257,7 @@ def main(argv=None):
     parser.add_argument("--summary-output", help="Atomically export segment profiles and silhouette score as JSON")
     cluster_group.add_argument("--auto-clusters", action="store_true", help="Select 2–6 clusters by silhouette score")
     parser.add_argument("--max-display-rows", type=int, default=20, help="Maximum customer rows printed; exports remain complete")
+    parser.add_argument("--escape-formulas", action="store_true", help="Prefix formula-like text with an apostrophe in CSV exports; calculations remain unchanged")
     args = parser.parse_args(argv)
     try:
         source_path = Path(args.csv_file).expanduser().resolve()
@@ -278,7 +289,7 @@ def main(argv=None):
         return 1
     if output_path is not None:
         try:
-            export_segments_csv_atomic(result, output_path)
+            export_segments_csv_atomic(result, output_path, **({"escape_formulas": True} if args.escape_formulas else {}))
         except OSError as exc:
             print(f"❌ Could not write segmentation CSV: {exc}")
             return 1

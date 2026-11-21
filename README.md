@@ -39,3 +39,5 @@ Use `--auto-clusters` instead of `--clusters` to evaluate 2–6 feasible cluster
 Silhouette evaluation deterministically samples at most 2,000 customers while including each cluster. Large customer files no longer require all-pairs scoring for every candidate cluster count; quality values for large files are sample estimates.
 
 Console customer previews default to 20 rows, configurable with `--max-display-rows`. Model fitting, profiles and CSV exports still include all customers.
+
+Use `--escape-formulas` when CSV exports will be opened in spreadsheet software. Formula-like text cells beginning with `=`, `+`, `-` or `@` after leading whitespace receive an apostrophe; numeric cells and in-memory calculations remain unchanged. The default export preserves original text.

@@ -41,3 +41,9 @@ Silhouette evaluation deterministically samples at most 2,000 customers while in
 Console customer previews default to 20 rows, configurable with `--max-display-rows`. Model fitting, profiles and CSV exports still include all customers.
 
 Use `--escape-formulas` when CSV exports will be opened in spreadsheet software. Formula-like text cells beginning with `=`, `+`, `-` or `@` after leading whitespace receive an apostrophe; numeric cells and in-memory calculations remain unchanged. The default export preserves original text.
+
+`--delimiter ";"`, `--delimiter tab` and `--delimiter "|"` support alternate input CSV separators, including quoted fields. Duplicate-header validation uses the selected separator. The default input and all CSV exports remain comma-separated.
+
+`--random-state N` controls K-Means fitting, automatic cluster selection and sampled silhouette scoring consistently. The default remains 42; repeatability assumes the same input, library versions and environment.
+
+Segment summaries include `customer_share_percent`, with all assigned customers forming the denominator. Missing segment identifiers are rejected rather than silently omitted from coverage.

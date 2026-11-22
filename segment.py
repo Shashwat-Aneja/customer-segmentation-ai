@@ -55,6 +55,8 @@ def summarize_segments(df):
     missing = required.difference(df.columns)
     if missing:
         raise ValueError(f"DataFrame must include: {', '.join(sorted(missing))}")
+    if df["segment"].isna().any():
+        raise ValueError("Segment identifiers cannot be missing from a summary.")
     summary = (
         df.groupby("segment", as_index=False)
         .agg(
@@ -65,6 +67,7 @@ def summarize_segments(df):
         .sort_values("segment")
         .reset_index(drop=True)
     )
+    summary["customer_share_percent"] = summary["customer_count"] / len(df) * 100 if len(df) else 0.0
     if "segment_name" in df.columns:
         names = df.drop_duplicates("segment").set_index("segment")["segment_name"]
         summary.insert(1, "segment_name", summary["segment"].map(names))

@@ -97,8 +97,14 @@ def assign_segment_names(df):
     return named
 
 
-def segmentation_silhouette_score(features, labels, max_samples=2000):
+def validate_random_state(value):
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < 2**32:
+        raise ValueError("random_state must be an integer from 0 through 2**32 - 1.")
+
+
+def segmentation_silhouette_score(features, labels, max_samples=2000, random_state=42):
     """Return a silhouette score when the cluster labels make it mathematically defined."""
+    validate_random_state(random_state)
     values = np.asarray(features, dtype=float)
     assignments = np.asarray(labels)
     if values.ndim != 2 or assignments.ndim != 1 or len(values) != len(assignments):
@@ -112,7 +118,7 @@ def segmentation_silhouette_score(features, labels, max_samples=2000):
     if not isinstance(max_samples, int) or isinstance(max_samples, bool) or max_samples < cluster_count + 1:
         raise ValueError("max_samples must allow at least one sample per cluster plus one.")
     if len(assignments) > max_samples:
-        generator = np.random.default_rng(42)
+        generator = np.random.default_rng(random_state)
         representatives = np.array([generator.choice(np.flatnonzero(assignments == label)) for label in np.unique(assignments)])
         remaining = np.setdiff1d(np.arange(len(assignments)), representatives)
         sampled = np.concatenate([representatives, generator.choice(remaining, max_samples - cluster_count, replace=False)])
@@ -126,7 +132,8 @@ def scale_customer_features(features):
     return StandardScaler().fit_transform(features / scale)
 
 
-def select_cluster_count(features, max_clusters=6):
+def select_cluster_count(features, max_clusters=6, random_state=42):
+    validate_random_state(random_state)
     """Select a bounded candidate count using silhouette quality on scaled features."""
     if not isinstance(max_clusters, int) or isinstance(max_clusters, bool) or not 2 <= max_clusters <= 10:
         raise ValueError("max_clusters must be an integer from 2 to 10.")
@@ -136,8 +143,8 @@ def select_cluster_count(features, max_clusters=6):
         raise ValueError("Automatic selection requires at least three rows and two distinct profiles.")
     best_count, best_score = None, -float("inf")
     for count in range(2, upper + 1):
-        labels = KMeans(n_clusters=count, random_state=42, n_init=10).fit_predict(values)
-        score = segmentation_silhouette_score(values, labels)
+        labels = KMeans(n_clusters=count, random_state=random_state, n_init=10).fit_predict(values)
+        score = segmentation_silhouette_score(values, labels, random_state=random_state)
         if score is not None and score > best_score:
             best_count, best_score = count, score
     if best_count is None:
@@ -145,8 +152,9 @@ def select_cluster_count(features, max_clusters=6):
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=","):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42):
     try:
+        validate_random_state(random_state)
         if not isinstance(max_display_rows, int) or isinstance(max_display_rows, bool) or max_display_rows < 1:
             raise ValueError("max_display_rows must be a positive integer.")
         df = _read_csv_input(csv_file, delimiter)
@@ -173,18 +181,18 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         ).all():
             raise ValueError("Customer visits must be non-negative whole numbers.")
         if auto_clusters:
-            n_clusters = select_cluster_count(features)
+            n_clusters = select_cluster_count(features, random_state=random_state)
         if len(df) < n_clusters:
             raise ValueError(f"At least {n_clusters} customers are required.")
         if len(features.drop_duplicates()) < n_clusters:
             raise ValueError(f"At least {n_clusters} distinct customer profiles are required.")
 
         scaled_features = scale_customer_features(features)
-        model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        model = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
         labels = model.fit_predict(scaled_features)
         df["segment"] = labels
         df = assign_segment_names(df)
-        quality_score = segmentation_silhouette_score(scaled_features, labels)
+        quality_score = segmentation_silhouette_score(scaled_features, labels, random_state=random_state)
         df.attrs["silhouette_score"] = quality_score
         df.attrs["cluster_count"] = n_clusters
 
@@ -266,6 +274,7 @@ def main(argv=None):
     parser.add_argument("--max-display-rows", type=int, default=20, help="Maximum customer rows printed; exports remain complete")
     parser.add_argument("--escape-formulas", action="store_true", help="Prefix formula-like text with an apostrophe in CSV exports; calculations remain unchanged")
     parser.add_argument("--delimiter", choices=(",", ";", "tab", "|"), default=",", help="Input CSV delimiter; exports remain comma-separated")
+    parser.add_argument("--random-state", type=int, default=42, help="Seed cluster fitting, automatic selection and silhouette sampling")
     args = parser.parse_args(argv)
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
     try:
@@ -293,6 +302,8 @@ def main(argv=None):
         return 1
     options = {"auto_clusters": True} if args.auto_clusters else {}
     options["max_display_rows"] = args.max_display_rows
+    if args.random_state != 42:
+        options["random_state"] = args.random_state
     if delimiter != ",":
         options["delimiter"] = delimiter
     result = segment_customers(args.csv_file, n_clusters=args.clusters, **options)

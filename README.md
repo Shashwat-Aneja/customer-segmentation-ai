@@ -43,3 +43,5 @@ Console customer previews default to 20 rows, configurable with `--max-display-r
 Use `--escape-formulas` when CSV exports will be opened in spreadsheet software. Formula-like text cells beginning with `=`, `+`, `-` or `@` after leading whitespace receive an apostrophe; numeric cells and in-memory calculations remain unchanged. The default export preserves original text.
 
 `--delimiter ";"`, `--delimiter tab` and `--delimiter "|"` support alternate input CSV separators, including quoted fields. Duplicate-header validation uses the selected separator. The default input and all CSV exports remain comma-separated.
+
+`--random-state N` controls K-Means fitting, automatic cluster selection and sampled silhouette scoring consistently. The default remains 42; repeatability assumes the same input, library versions and environment.

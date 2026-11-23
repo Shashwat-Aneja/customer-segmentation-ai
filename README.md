@@ -47,3 +47,5 @@ Use `--escape-formulas` when CSV exports will be opened in spreadsheet software.
 `--random-state N` controls K-Means fitting, automatic cluster selection and sampled silhouette scoring consistently. The default remains 42; repeatability assumes the same input, library versions and environment.
 
 Segment summaries include `customer_share_percent`, with all assigned customers forming the denominator. Missing segment identifiers are rejected rather than silently omitted from coverage.
+
+Seekable caller-owned text and UTF-8 binary CSV streams now receive the same duplicate-header checks as file paths, before pandas can rename ambiguous columns. Validation restores the starting position and leaves caller streams open; nonseekable stream objects are rejected explicitly.

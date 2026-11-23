@@ -1,3 +1,4 @@
+import io
 import csv
 import argparse
 import math
@@ -18,8 +19,8 @@ FEATURE_COLUMNS = ["total_spent", "visits"]
 def _read_csv_input(csv_file, delimiter=",", **options):
     if delimiter not in (",", ";", "\t", "|"):
         raise ValueError("Unsupported input delimiter.")
-    frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
     _reject_duplicate_headers(csv_file, delimiter)
+    frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
     return frame
 
 
@@ -33,12 +34,61 @@ def escape_csv_formulas(frame):
 
 
 def _reject_duplicate_headers(csv_file, delimiter=","):
-    """Do not let pandas silently rename ambiguous source CSV columns."""
-    if isinstance(csv_file, (str, os.PathLike)) and Path(csv_file).is_file():
+    """Inspect original UTF-8 CSV headers without taking ownership of streams."""
+    def header_lines(source):
+        # csv.reader needs physical lines even for StringIO objects whose default
+        # iterator does not recognize CR-only records. Preserve quoted newlines.
+        pending = ""
+        first = True
+        started = False
+        while True:
+            chars = []
+            while True:
+                char = pending or source.read(1)
+                pending = ""
+                if not char:
+                    break
+                if first:
+                    first = False
+                    if char == "\ufeff":
+                        continue
+                chars.append(char)
+                if char == "\r":
+                    following = source.read(1)
+                    if following == "\n":
+                        chars.append(following)
+                    else:
+                        pending = following
+                    break
+                if char == "\n":
+                    break
+            if not chars:
+                return
+            line = "".join(chars)
+            if not started and not line.strip():
+                continue
+            started = True
+            yield line
+
+    if isinstance(csv_file, (str, os.PathLike)):
+        if not Path(csv_file).is_file():
+            return
         with open(csv_file, encoding="utf-8-sig", newline="") as source:
-            headers = next(csv.reader(source, delimiter=delimiter), [])
-        if len(headers) != len(set(headers)):
-            raise ValueError("CSV column names must be unique; duplicate headers are ambiguous.")
+            headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+    else:
+        if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
+            raise ValueError("CSV streams must be seekable for header validation.")
+        position = csv_file.tell()
+        binary = isinstance(csv_file.read(0), bytes)
+        source = io.TextIOWrapper(csv_file, encoding="utf-8-sig", newline="") if binary else csv_file
+        try:
+            headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        finally:
+            if binary:
+                source.detach()
+            csv_file.seek(position)
+    if len(headers) != len(set(headers)):
+        raise ValueError("CSV column names must be unique; duplicate headers are ambiguous.")
 
 
 def _stable_group_mean(values):

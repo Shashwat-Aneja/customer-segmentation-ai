@@ -49,3 +49,5 @@ Use `--escape-formulas` when CSV exports will be opened in spreadsheet software.
 Segment summaries include `customer_share_percent`, with all assigned customers forming the denominator. Missing segment identifiers are rejected rather than silently omitted from coverage.
 
 Seekable caller-owned text and UTF-8 binary CSV streams now receive the same duplicate-header checks as file paths, before pandas can rename ambiguous columns. Validation restores the starting position and leaves caller streams open; nonseekable stream objects are rejected explicitly.
+
+`--id-column customer_id` optionally requires non-empty unique customer identities before clustering. Identifier text preserves leading zeros; whitespace is ignored for uniqueness checks. Duplicate identities fail explicitly instead of being dropped or silently giving a customer extra weight.

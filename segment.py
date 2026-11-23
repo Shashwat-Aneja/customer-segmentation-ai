@@ -205,12 +205,23 @@ def select_cluster_count(features, max_clusters=6, random_state=42):
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None):
     try:
         validate_random_state(random_state)
         if not isinstance(max_display_rows, int) or isinstance(max_display_rows, bool) or max_display_rows < 1:
             raise ValueError("max_display_rows must be a positive integer.")
-        df = _read_csv_input(csv_file, delimiter)
+        if id_column is not None and (not isinstance(id_column, str) or not id_column.strip() or id_column in FEATURE_COLUMNS or id_column in {"segment", "segment_name"}):
+            raise ValueError("Customer ID column must be a distinct source identifier.")
+        df = _read_csv_input(csv_file, delimiter, **({"converters": {id_column: lambda value: "__id__" + value}} if id_column is not None else {}))
+        if id_column is not None:
+            if id_column not in df.columns:
+                raise ValueError("Customer ID column was not found.")
+            # Some pandas versions recognize NA after applying converters.
+            # A temporary prefix protects literal IDs; it never leaves parsing.
+            df[id_column] = df[id_column].astype("string").str.slice(6)
+            identifiers = df[id_column].str.strip()
+            if identifiers.isna().any() or identifiers.eq("").any() or identifiers.duplicated().any():
+                raise ValueError("Customer IDs must be non-empty and unique.")
         missing = set(FEATURE_COLUMNS).difference(df.columns)
         if missing:
             raise ValueError(f"CSV must include: {', '.join(sorted(missing))}")
@@ -328,6 +339,7 @@ def main(argv=None):
     parser.add_argument("--escape-formulas", action="store_true", help="Prefix formula-like text with an apostrophe in CSV exports; calculations remain unchanged")
     parser.add_argument("--delimiter", choices=(",", ";", "tab", "|"), default=",", help="Input CSV delimiter; exports remain comma-separated")
     parser.add_argument("--random-state", type=int, default=42, help="Seed cluster fitting, automatic selection and silhouette sampling")
+    parser.add_argument("--id-column", help="Require unique non-empty customer IDs and preserve their leading zeros")
     args = parser.parse_args(argv)
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
     try:
@@ -355,6 +367,8 @@ def main(argv=None):
         return 1
     options = {"auto_clusters": True} if args.auto_clusters else {}
     options["max_display_rows"] = args.max_display_rows
+    if args.id_column is not None:
+        options["id_column"] = args.id_column
     if args.random_state != 42:
         options["random_state"] = args.random_state
     if delimiter != ",":

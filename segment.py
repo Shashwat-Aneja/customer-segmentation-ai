@@ -1,3 +1,6 @@
+import gzip
+import bz2
+import lzma
 import io
 import csv
 import argparse
@@ -20,7 +23,10 @@ def _read_csv_input(csv_file, delimiter=",", **options):
     if delimiter not in (",", ";", "\t", "|"):
         raise ValueError("Unsupported input delimiter.")
     _reject_duplicate_headers(csv_file, delimiter)
-    frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
+    try:
+        frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
+    except (EOFError, lzma.LZMAError) as exc:
+        raise ValueError("Compressed CSV input is corrupt or incomplete.") from exc
     return frame
 
 
@@ -73,8 +79,12 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
     if isinstance(csv_file, (str, os.PathLike)):
         if not Path(csv_file).is_file():
             return
-        with open(csv_file, encoding="utf-8-sig", newline="") as source:
-            headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(Path(csv_file).suffix, open)
+        try:
+            with opener(csv_file, mode="rt", encoding="utf-8-sig", newline="") as source:
+                headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        except (EOFError, lzma.LZMAError) as exc:
+            raise ValueError("Compressed CSV input is corrupt or incomplete.") from exc
     else:
         if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
             raise ValueError("CSV streams must be seekable for header validation.")

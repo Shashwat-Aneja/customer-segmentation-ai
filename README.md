@@ -51,3 +51,7 @@ Segment summaries include `customer_share_percent`, with all assigned customers 
 Seekable caller-owned text and UTF-8 binary CSV streams now receive the same duplicate-header checks as file paths, before pandas can rename ambiguous columns. Validation restores the starting position and leaves caller streams open; nonseekable stream objects are rejected explicitly.
 
 `--id-column customer_id` optionally requires non-empty unique customer identities before clustering. Identifier text preserves leading zeros; whitespace is ignored for uniqueness checks. Duplicate identities fail explicitly instead of being dropped or silently giving a customer extra weight.
+
+CSV paths ending in `.gz`, `.bz2`, or `.xz` are supported without unpacking a separate file. Header validation reads the same compression format as pandas and still rejects duplicate columns, including BOM-prefixed quoted headers and alternate delimiters. Archive containers such as ZIP/TAR are outside this feature.
+
+`--include-distances` adds a finite Euclidean `distance_to_centroid` for each customer in the model’s scaled feature space. Distances help inspect within-segment spread; they are not probabilities or an automatic outlier classification. Existing source columns with that name are rejected before generating it.

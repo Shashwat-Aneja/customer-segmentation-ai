@@ -1,3 +1,6 @@
+import gzip
+import bz2
+import lzma
 import io
 import csv
 import argparse
@@ -20,7 +23,10 @@ def _read_csv_input(csv_file, delimiter=",", **options):
     if delimiter not in (",", ";", "\t", "|"):
         raise ValueError("Unsupported input delimiter.")
     _reject_duplicate_headers(csv_file, delimiter)
-    frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
+    try:
+        frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
+    except (EOFError, lzma.LZMAError) as exc:
+        raise ValueError("Compressed CSV input is corrupt or incomplete.") from exc
     return frame
 
 
@@ -73,8 +79,12 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
     if isinstance(csv_file, (str, os.PathLike)):
         if not Path(csv_file).is_file():
             return
-        with open(csv_file, encoding="utf-8-sig", newline="") as source:
-            headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(Path(csv_file).suffix, open)
+        try:
+            with opener(csv_file, mode="rt", encoding="utf-8-sig", newline="") as source:
+                headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        except (EOFError, lzma.LZMAError) as exc:
+            raise ValueError("Compressed CSV input is corrupt or incomplete.") from exc
     else:
         if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
             raise ValueError("CSV streams must be seekable for header validation.")
@@ -205,8 +215,10 @@ def select_cluster_count(features, max_clusters=6, random_state=42):
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False):
     try:
+        if not isinstance(include_distances, bool):
+            raise ValueError("include_distances must be a boolean.")
         validate_random_state(random_state)
         if not isinstance(max_display_rows, int) or isinstance(max_display_rows, bool) or max_display_rows < 1:
             raise ValueError("max_display_rows must be a positive integer.")
@@ -222,6 +234,8 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
             identifiers = df[id_column].str.strip()
             if identifiers.isna().any() or identifiers.eq("").any() or identifiers.duplicated().any():
                 raise ValueError("Customer IDs must be non-empty and unique.")
+        if include_distances and "distance_to_centroid" in df.columns:
+            raise ValueError("distance_to_centroid is reserved for generated diagnostics.")
         missing = set(FEATURE_COLUMNS).difference(df.columns)
         if missing:
             raise ValueError(f"CSV must include: {', '.join(sorted(missing))}")
@@ -254,6 +268,11 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         scaled_features = scale_customer_features(features)
         model = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
         labels = model.fit_predict(scaled_features)
+        if include_distances:
+            distances = np.linalg.norm(scaled_features - model.cluster_centers_[labels], axis=1)
+            if not np.isfinite(distances).all():
+                raise ValueError("Centroid distances must be finite.")
+            df["distance_to_centroid"] = distances
         df["segment"] = labels
         df = assign_segment_names(df)
         quality_score = segmentation_silhouette_score(scaled_features, labels, random_state=random_state)
@@ -340,6 +359,7 @@ def main(argv=None):
     parser.add_argument("--delimiter", choices=(",", ";", "tab", "|"), default=",", help="Input CSV delimiter; exports remain comma-separated")
     parser.add_argument("--random-state", type=int, default=42, help="Seed cluster fitting, automatic selection and silhouette sampling")
     parser.add_argument("--id-column", help="Require unique non-empty customer IDs and preserve their leading zeros")
+    parser.add_argument("--include-distances", action="store_true", help="Include each customer’s Euclidean distance to its fitted centroid in scaled feature space")
     args = parser.parse_args(argv)
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
     try:
@@ -367,6 +387,8 @@ def main(argv=None):
         return 1
     options = {"auto_clusters": True} if args.auto_clusters else {}
     options["max_display_rows"] = args.max_display_rows
+    if args.include_distances:
+        options["include_distances"] = True
     if args.id_column is not None:
         options["id_column"] = args.id_column
     if args.random_state != 42:

@@ -1,3 +1,4 @@
+import zlib
 import gzip
 import bz2
 import lzma
@@ -25,8 +26,8 @@ def _read_csv_input(csv_file, delimiter=",", **options):
     _reject_duplicate_headers(csv_file, delimiter)
     try:
         frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
-    except (EOFError, lzma.LZMAError) as exc:
-        raise ValueError("Compressed CSV input is corrupt or incomplete.") from exc
+    except (EOFError, lzma.LZMAError, zlib.error, csv.Error) as exc:
+        raise ValueError("CSV input is corrupt or incomplete, or its header exceeds parser limits.") from exc
     return frame
 
 
@@ -83,8 +84,8 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
         try:
             with opener(csv_file, mode="rt", encoding="utf-8-sig", newline="") as source:
                 headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
-        except (EOFError, lzma.LZMAError) as exc:
-            raise ValueError("Compressed CSV input is corrupt or incomplete.") from exc
+        except (EOFError, lzma.LZMAError, zlib.error, csv.Error) as exc:
+            raise ValueError("CSV input is corrupt or incomplete, or its header exceeds parser limits.") from exc
     else:
         if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
             raise ValueError("CSV streams must be seekable for header validation.")
@@ -93,6 +94,8 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
         source = io.TextIOWrapper(csv_file, encoding="utf-8-sig", newline="") if binary else csv_file
         try:
             headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
+        except (EOFError, lzma.LZMAError, zlib.error, csv.Error) as exc:
+            raise ValueError("CSV input is corrupt or incomplete, or its header exceeds parser limits.") from exc
         finally:
             if binary:
                 source.detach()

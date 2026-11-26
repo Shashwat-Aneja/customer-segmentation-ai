@@ -55,3 +55,5 @@ Seekable caller-owned text and UTF-8 binary CSV streams now receive the same dup
 CSV paths ending in `.gz`, `.bz2`, or `.xz` are supported without unpacking a separate file. Header validation reads the same compression format as pandas and still rejects duplicate columns, including BOM-prefixed quoted headers and alternate delimiters. Archive containers such as ZIP/TAR are outside this feature.
 
 `--include-distances` adds a finite Euclidean `distance_to_centroid` for each customer in the model’s scaled feature space. Distances help inspect within-segment spread; they are not probabilities or an automatic outlier classification. Existing source columns with that name are rejected before generating it.
+
+Corrupt compressed bodies, invalid DEFLATE blocks and header-parser limit failures use the normal validation-error path rather than escaping as EOFError, zlib.error or csv.Error. Header inspection restores caller stream position/ownership on these failures. No invalid input is exported.

@@ -226,8 +226,12 @@ def select_cluster_count(features, max_clusters=6, random_state=42):
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False, max_rows=None):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False, max_rows=None, auto_max_clusters=6):
     try:
+        if isinstance(auto_max_clusters, bool) or not isinstance(auto_max_clusters, int) or not 2 <= auto_max_clusters <= 10:
+            raise ValueError("auto_max_clusters must be an integer from 2 to 10.")
+        if not auto_clusters and auto_max_clusters != 6:
+            raise ValueError("A custom automatic cluster budget requires auto_clusters.")
         if not isinstance(include_distances, bool):
             raise ValueError("include_distances must be a boolean.")
         validate_random_state(random_state)
@@ -270,7 +274,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         ).all():
             raise ValueError("Customer visits must be non-negative whole numbers.")
         if auto_clusters:
-            n_clusters = select_cluster_count(features, random_state=random_state)
+            n_clusters = select_cluster_count(features, random_state=random_state, **({"max_clusters": auto_max_clusters} if auto_max_clusters != 6 else {}))
         if len(df) < n_clusters:
             raise ValueError(f"At least {n_clusters} customers are required.")
         if len(features.drop_duplicates()) < n_clusters:
@@ -372,7 +376,10 @@ def main(argv=None):
     parser.add_argument("--id-column", help="Require unique non-empty customer IDs and preserve their leading zeros")
     parser.add_argument("--include-distances", action="store_true", help="Include each customer’s Euclidean distance to its fitted centroid in scaled feature space")
     parser.add_argument("--max-input-rows", type=int, help="Reject CSV files exceeding this raw row budget (1..10000000)")
+    parser.add_argument("--max-clusters", type=int, help="Automatic selection upper bound (2..10)")
     args = parser.parse_args(argv)
+    if args.max_clusters is not None and (not args.auto_clusters or not 2 <= args.max_clusters <= 10):
+        parser.error("--max-clusters requires --auto-clusters and a value from 2 to 10")
     if args.max_input_rows is not None and not 1 <= args.max_input_rows <= 10_000_000:
         parser.error("--max-input-rows must be from 1 to 10000000")
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
@@ -400,6 +407,8 @@ def main(argv=None):
         print(f"❌ Could not validate export paths: {exc}")
         return 1
     options = {"auto_clusters": True} if args.auto_clusters else {}
+    if args.max_clusters is not None:
+        options["auto_max_clusters"] = args.max_clusters
     options["max_display_rows"] = args.max_display_rows
     if args.include_distances:
         options["include_distances"] = True

@@ -61,3 +61,5 @@ Corrupt compressed bodies, invalid DEFLATE blocks and header-parser limit failur
 ### Optional raw CSV row budget
 
 Use `--max-input-rows 100000` to reject an input file with more than that many data rows before modeling or export. The budget is per file, including comparison/training/scoring inputs, and applies before filtering or aggregation. The default remains unlimited. Values must be integers from 1 to 10,000,000. Only the budget plus one rows are loaded; oversized inputs fail rather than being silently truncated. This is a row limit, not a byte or field-size limit. Python callers can use `max_rows=`.
+
+Use `--auto-clusters --max-clusters 4` to bound automatic candidate fits (2..10, default 6). The bound is also clamped by available samples and distinct profiles.

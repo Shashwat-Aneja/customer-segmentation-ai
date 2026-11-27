@@ -57,3 +57,7 @@ CSV paths ending in `.gz`, `.bz2`, or `.xz` are supported without unpacking a se
 `--include-distances` adds a finite Euclidean `distance_to_centroid` for each customer in the model’s scaled feature space. Distances help inspect within-segment spread; they are not probabilities or an automatic outlier classification. Existing source columns with that name are rejected before generating it.
 
 Corrupt compressed bodies, invalid DEFLATE blocks and header-parser limit failures use the normal validation-error path rather than escaping as EOFError, zlib.error or csv.Error. Header inspection restores caller stream position/ownership on these failures. No invalid input is exported.
+
+### Optional raw CSV row budget
+
+Use `--max-input-rows 100000` to reject an input file with more than that many data rows before modeling or export. The budget is per file, including comparison/training/scoring inputs, and applies before filtering or aggregation. The default remains unlimited. Values must be integers from 1 to 10,000,000. Only the budget plus one rows are loaded; oversized inputs fail rather than being silently truncated. This is a row limit, not a byte or field-size limit. Python callers can use `max_rows=`.

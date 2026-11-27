@@ -20,14 +20,22 @@ from sklearn.preprocessing import StandardScaler
 FEATURE_COLUMNS = ["total_spent", "visits"]
 
 
-def _read_csv_input(csv_file, delimiter=",", **options):
+def _read_csv_input(csv_file, delimiter=",", max_rows=None, **options):
+    if max_rows is not None and (isinstance(max_rows, bool) or not isinstance(max_rows, int) or not 1 <= max_rows <= 10_000_000):
+        raise ValueError("max_rows must be an integer from 1 to 10000000.")
     if delimiter not in (",", ";", "\t", "|"):
         raise ValueError("Unsupported input delimiter.")
+    if max_rows is not None:
+        if "nrows" in options:
+            raise ValueError("Do not combine nrows and max_rows.")
+        options["nrows"] = max_rows + 1
     _reject_duplicate_headers(csv_file, delimiter)
     try:
         frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
     except (EOFError, lzma.LZMAError, zlib.error, csv.Error) as exc:
         raise ValueError("CSV input is corrupt or incomplete, or its header exceeds parser limits.") from exc
+    if max_rows is not None and len(frame) > max_rows:
+        raise ValueError("CSV input exceeds the configured row limit.")
     return frame
 
 
@@ -218,7 +226,7 @@ def select_cluster_count(features, max_clusters=6, random_state=42):
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False, max_rows=None):
     try:
         if not isinstance(include_distances, bool):
             raise ValueError("include_distances must be a boolean.")
@@ -227,7 +235,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
             raise ValueError("max_display_rows must be a positive integer.")
         if id_column is not None and (not isinstance(id_column, str) or not id_column.strip() or id_column in FEATURE_COLUMNS or id_column in {"segment", "segment_name"}):
             raise ValueError("Customer ID column must be a distinct source identifier.")
-        df = _read_csv_input(csv_file, delimiter, **({"converters": {id_column: lambda value: "__id__" + value}} if id_column is not None else {}))
+        df = _read_csv_input(csv_file, delimiter, **({"max_rows": max_rows} if max_rows is not None else {}), **({"converters": {id_column: lambda value: "__id__" + value}} if id_column is not None else {}))
         if id_column is not None:
             if id_column not in df.columns:
                 raise ValueError("Customer ID column was not found.")
@@ -363,7 +371,10 @@ def main(argv=None):
     parser.add_argument("--random-state", type=int, default=42, help="Seed cluster fitting, automatic selection and silhouette sampling")
     parser.add_argument("--id-column", help="Require unique non-empty customer IDs and preserve their leading zeros")
     parser.add_argument("--include-distances", action="store_true", help="Include each customer’s Euclidean distance to its fitted centroid in scaled feature space")
+    parser.add_argument("--max-input-rows", type=int, help="Reject CSV files exceeding this raw row budget (1..10000000)")
     args = parser.parse_args(argv)
+    if args.max_input_rows is not None and not 1 <= args.max_input_rows <= 10_000_000:
+        parser.error("--max-input-rows must be from 1 to 10000000")
     delimiter = "\t" if args.delimiter == "tab" else args.delimiter
     try:
         source_path = Path(args.csv_file).expanduser().resolve()
@@ -396,6 +407,8 @@ def main(argv=None):
         options["id_column"] = args.id_column
     if args.random_state != 42:
         options["random_state"] = args.random_state
+    if args.max_input_rows is not None:
+        options["max_rows"] = args.max_input_rows
     if delimiter != ",":
         options["delimiter"] = delimiter
     result = segment_customers(args.csv_file, n_clusters=args.clusters, **options)

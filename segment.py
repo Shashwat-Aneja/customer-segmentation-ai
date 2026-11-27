@@ -200,18 +200,21 @@ def segmentation_silhouette_score(features, labels, max_samples=2000, random_sta
     return float(silhouette_score(values, assignments))
 
 
-def scale_customer_features(features):
+def scale_customer_features(features, feature_weights=None):
     """Normalize magnitude before centering so finite values cannot overflow."""
     scale = features.abs().max().replace(0, 1.0)
-    return StandardScaler().fit_transform(features / scale)
+    weights = [1.0, 1.0] if feature_weights is None else feature_weights
+    if not isinstance(weights, (list, tuple)) or len(weights) != len(FEATURE_COLUMNS) or any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float)) or not np.isfinite(value) or not 1e-12 <= value <= 1000 for value in weights):
+        raise ValueError("Feature weights must be two finite numbers from 1e-12 to 1000.")
+    return StandardScaler().fit_transform(features / scale) * np.sqrt(weights)
 
 
-def select_cluster_count(features, max_clusters=6, random_state=42):
+def select_cluster_count(features, max_clusters=6, random_state=42, feature_weights=None):
     validate_random_state(random_state)
     """Select a bounded candidate count using silhouette quality on scaled features."""
     if not isinstance(max_clusters, int) or isinstance(max_clusters, bool) or not 2 <= max_clusters <= 10:
         raise ValueError("max_clusters must be an integer from 2 to 10.")
-    values = scale_customer_features(features)
+    values = scale_customer_features(features, **({"feature_weights": feature_weights} if feature_weights is not None else {}))
     upper = min(max_clusters, len(features) - 1, len(features.drop_duplicates()))
     if upper < 2:
         raise ValueError("Automatic selection requires at least three rows and two distinct profiles.")
@@ -226,8 +229,12 @@ def select_cluster_count(features, max_clusters=6, random_state=42):
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False, max_rows=None, auto_max_clusters=6):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False, max_rows=None, auto_max_clusters=6, spend_weight=1.0, visits_weight=1.0):
     try:
+        weights = [spend_weight, visits_weight]
+        if any(isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float)) or not np.isfinite(v) or not 1e-12 <= v <= 1000 for v in weights):
+            raise ValueError("Feature weights must be finite numbers from 1e-12 to 1000.")
+        weight_options = {"feature_weights": weights} if weights != [1.0, 1.0] else {}
         if isinstance(auto_max_clusters, bool) or not isinstance(auto_max_clusters, int) or not 2 <= auto_max_clusters <= 10:
             raise ValueError("auto_max_clusters must be an integer from 2 to 10.")
         if not auto_clusters and auto_max_clusters != 6:
@@ -274,13 +281,13 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         ).all():
             raise ValueError("Customer visits must be non-negative whole numbers.")
         if auto_clusters:
-            n_clusters = select_cluster_count(features, random_state=random_state, **({"max_clusters": auto_max_clusters} if auto_max_clusters != 6 else {}))
+            n_clusters = select_cluster_count(features, random_state=random_state, **weight_options, **({"max_clusters": auto_max_clusters} if auto_max_clusters != 6 else {}))
         if len(df) < n_clusters:
             raise ValueError(f"At least {n_clusters} customers are required.")
         if len(features.drop_duplicates()) < n_clusters:
             raise ValueError(f"At least {n_clusters} distinct customer profiles are required.")
 
-        scaled_features = scale_customer_features(features)
+        scaled_features = scale_customer_features(features, **weight_options)
         model = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
         labels = model.fit_predict(scaled_features)
         if include_distances:
@@ -293,6 +300,8 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
         quality_score = segmentation_silhouette_score(scaled_features, labels, random_state=random_state)
         df.attrs["silhouette_score"] = quality_score
         df.attrs["cluster_count"] = n_clusters
+        if weight_options:
+            df.attrs["feature_weights"] = dict(zip(FEATURE_COLUMNS, weights))
 
         columns = (["customer_id"] if "customer_id" in df.columns else []) + FEATURE_COLUMNS + ["segment", "segment_name"]
         print("\n===== Customer Segmentation Results =====")
@@ -377,6 +386,8 @@ def main(argv=None):
     parser.add_argument("--include-distances", action="store_true", help="Include each customer’s Euclidean distance to its fitted centroid in scaled feature space")
     parser.add_argument("--max-input-rows", type=int, help="Reject CSV files exceeding this raw row budget (1..10000000)")
     parser.add_argument("--max-clusters", type=int, help="Automatic selection upper bound (2..10)")
+    parser.add_argument("--spend-weight", type=float, default=1.0)
+    parser.add_argument("--visits-weight", type=float, default=1.0)
     args = parser.parse_args(argv)
     if args.max_clusters is not None and (not args.auto_clusters or not 2 <= args.max_clusters <= 10):
         parser.error("--max-clusters requires --auto-clusters and a value from 2 to 10")
@@ -409,6 +420,8 @@ def main(argv=None):
     options = {"auto_clusters": True} if args.auto_clusters else {}
     if args.max_clusters is not None:
         options["auto_max_clusters"] = args.max_clusters
+    if args.spend_weight != 1.0 or args.visits_weight != 1.0:
+        options.update(spend_weight=args.spend_weight, visits_weight=args.visits_weight)
     options["max_display_rows"] = args.max_display_rows
     if args.include_distances:
         options["include_distances"] = True

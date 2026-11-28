@@ -65,3 +65,5 @@ Use `--max-input-rows 100000` to reject an input file with more than that many d
 Use `--auto-clusters --max-clusters 4` to bound automatic candidate fits (2..10, default 6). The bound is also clamped by available samples and distinct profiles.
 
 `--spend-weight` and `--visits-weight` control weighted squared Euclidean distance after standardization (finite 1e-12..1000, defaults 1). Coordinates are multiplied by the square root of each weight. Automatic cluster selection, silhouette scoring, fitting and centroid distances use the same weighted space. Returned dataframe attributes record nondefault weights.
+
+`--encoding utf-8|utf-8-sig|cp1252|latin-1` explicitly selects CSV input decoding, including compressed files and binary streams. Header validation and data parsing use the same encoding; comparison/training/scoring inputs share it. The default remains UTF-8, and export encoding is unchanged. Text streams are already decoded by their caller.

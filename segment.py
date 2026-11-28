@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import zlib
 import gzip
 import bz2
@@ -20,7 +22,60 @@ from sklearn.preprocessing import StandardScaler
 FEATURE_COLUMNS = ["total_spent", "visits"]
 
 
-def _read_csv_input(csv_file, delimiter=",", max_rows=None, **options):
+def _snapshot_csv_input(csv_file, max_bytes, encoding):
+    """Snapshot bounded decompressed CSV bytes without consuming caller streams."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= 64 * 1024 * 1024:
+        raise ValueError("max_bytes must be an integer from 1 to 67108864.")
+    def read_complete(source):
+        chunks = []
+        units = 0
+        kind = None
+        while units <= max_bytes:
+            chunk = source.read(min(65536, max_bytes + 1 - units))
+            if not isinstance(chunk, (str, bytes)):
+                raise ValueError("CSV stream read must return bytes or text.")
+            if kind is not None and type(chunk) is not kind:
+                raise ValueError("CSV stream read type must be consistent.")
+            kind = type(chunk)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            units += len(chunk)
+        # Encode text once so codecs with BOMs do not insert one per chunk.
+        raw = ("".join(chunks).encode(encoding) if kind is str else b"".join(chunks))
+        return raw
+    if isinstance(csv_file, (str, os.PathLike)):
+        path = Path(csv_file)
+        if not path.is_file():
+            raise ValueError("Bounded CSV input must be a local regular file or seekable stream.")
+        opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(path.suffix.lower(), open)
+        try:
+            with opener(path, "rb") as source:
+                raw = read_complete(source)
+        except (EOFError, lzma.LZMAError, zlib.error) as exc:
+            raise ValueError("CSV input is corrupt or incomplete.") from exc
+    else:
+        if not all(hasattr(csv_file, name) for name in ("read", "seek", "tell")) or (hasattr(csv_file, "seekable") and not csv_file.seekable()):
+            raise ValueError("Bounded CSV streams must be seekable.")
+        position = csv_file.tell()
+        try:
+            raw = read_complete(csv_file)
+        except (EOFError, lzma.LZMAError, zlib.error) as exc:
+            raise ValueError("CSV input is corrupt or incomplete.") from exc
+        finally:
+            csv_file.seek(position)
+        if isinstance(raw, str):
+            raw = raw.encode(encoding)
+        if not isinstance(raw, bytes):
+            raise ValueError("CSV stream read must return bytes or text.")
+    if len(raw) > max_bytes:
+        raise ValueError("CSV input exceeds the configured decompressed byte limit.")
+    return io.BytesIO(raw)
+
+
+def _read_csv_input(csv_file, delimiter=",", max_rows=None, encoding="utf-8", max_bytes=None, expected_sha256=None, **options):
+    if encoding not in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
+        raise ValueError("Unsupported input encoding.")
     if max_rows is not None and (isinstance(max_rows, bool) or not isinstance(max_rows, int) or not 1 <= max_rows <= 10_000_000):
         raise ValueError("max_rows must be an integer from 1 to 10000000.")
     if delimiter not in (",", ";", "\t", "|"):
@@ -29,9 +84,18 @@ def _read_csv_input(csv_file, delimiter=",", max_rows=None, **options):
         if "nrows" in options:
             raise ValueError("Do not combine nrows and max_rows.")
         options["nrows"] = max_rows + 1
-    _reject_duplicate_headers(csv_file, delimiter)
+    if expected_sha256 is not None:
+        if not isinstance(expected_sha256, str) or len(expected_sha256) != 64 or any(c not in "0123456789abcdefABCDEF" for c in expected_sha256):
+            raise ValueError("expected_sha256 must be a 64-character hexadecimal digest.")
+        csv_file = _snapshot_csv_input(csv_file, max_bytes if max_bytes is not None else 64 * 1024 * 1024, encoding)
+        actual = hashlib.sha256(csv_file.getbuffer()).hexdigest()
+        if not hmac.compare_digest(actual, expected_sha256.lower()):
+            raise ValueError("CSV input SHA-256 does not match the expected digest.")
+    elif max_bytes is not None:
+        csv_file = _snapshot_csv_input(csv_file, max_bytes, encoding)
+    _reject_duplicate_headers(csv_file, delimiter, encoding=encoding)
     try:
-        frame = pd.read_csv(csv_file, **options, **({"sep": delimiter} if delimiter != "," else {}))
+        frame = pd.read_csv(csv_file, **({"encoding": encoding} if encoding != "utf-8" else {}), **options, **({"sep": delimiter} if delimiter != "," else {}))
     except (EOFError, lzma.LZMAError, zlib.error, csv.Error) as exc:
         raise ValueError("CSV input is corrupt or incomplete, or its header exceeds parser limits.") from exc
     if max_rows is not None and len(frame) > max_rows:
@@ -48,7 +112,7 @@ def escape_csv_formulas(frame):
     return frame.apply(lambda column: column.map(escape))
 
 
-def _reject_duplicate_headers(csv_file, delimiter=","):
+def _reject_duplicate_headers(csv_file, delimiter=",", encoding="utf-8"):
     """Inspect original UTF-8 CSV headers without taking ownership of streams."""
     def header_lines(source):
         # csv.reader needs physical lines even for StringIO objects whose default
@@ -90,7 +154,7 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
             return
         opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(Path(csv_file).suffix, open)
         try:
-            with opener(csv_file, mode="rt", encoding="utf-8-sig", newline="") as source:
+            with opener(csv_file, mode="rt", encoding=encoding, newline="") as source:
                 headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
         except (EOFError, lzma.LZMAError, zlib.error, csv.Error) as exc:
             raise ValueError("CSV input is corrupt or incomplete, or its header exceeds parser limits.") from exc
@@ -99,7 +163,7 @@ def _reject_duplicate_headers(csv_file, delimiter=","):
             raise ValueError("CSV streams must be seekable for header validation.")
         position = csv_file.tell()
         binary = isinstance(csv_file.read(0), bytes)
-        source = io.TextIOWrapper(csv_file, encoding="utf-8-sig", newline="") if binary else csv_file
+        source = io.TextIOWrapper(csv_file, encoding=encoding, newline="") if binary else csv_file
         try:
             headers = next(csv.reader(header_lines(source), delimiter=delimiter), [])
         except (EOFError, lzma.LZMAError, zlib.error, csv.Error) as exc:
@@ -229,7 +293,7 @@ def select_cluster_count(features, max_clusters=6, random_state=42, feature_weig
     return best_count
 
 
-def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False, max_rows=None, auto_max_clusters=6, spend_weight=1.0, visits_weight=1.0):
+def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_rows=20, delimiter=",", random_state=42, id_column=None, include_distances=False, max_rows=None, auto_max_clusters=6, spend_weight=1.0, visits_weight=1.0, encoding="utf-8", max_bytes=None, expected_sha256=None):
     try:
         weights = [spend_weight, visits_weight]
         if any(isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float)) or not np.isfinite(v) or not 1e-12 <= v <= 1000 for v in weights):
@@ -246,7 +310,7 @@ def segment_customers(csv_file, n_clusters=3, auto_clusters=False, max_display_r
             raise ValueError("max_display_rows must be a positive integer.")
         if id_column is not None and (not isinstance(id_column, str) or not id_column.strip() or id_column in FEATURE_COLUMNS or id_column in {"segment", "segment_name"}):
             raise ValueError("Customer ID column must be a distinct source identifier.")
-        df = _read_csv_input(csv_file, delimiter, **({"max_rows": max_rows} if max_rows is not None else {}), **({"converters": {id_column: lambda value: "__id__" + value}} if id_column is not None else {}))
+        df = _read_csv_input(csv_file, delimiter, **({"expected_sha256": expected_sha256} if expected_sha256 is not None else {}), **({"max_bytes": max_bytes} if max_bytes is not None else {}), **({"encoding": encoding} if encoding != "utf-8" else {}), **({"max_rows": max_rows} if max_rows is not None else {}), **({"converters": {id_column: lambda value: "__id__" + value}} if id_column is not None else {}))
         if id_column is not None:
             if id_column not in df.columns:
                 raise ValueError("Customer ID column was not found.")
@@ -388,7 +452,12 @@ def main(argv=None):
     parser.add_argument("--max-clusters", type=int, help="Automatic selection upper bound (2..10)")
     parser.add_argument("--spend-weight", type=float, default=1.0)
     parser.add_argument("--visits-weight", type=float, default=1.0)
+    parser.add_argument("--encoding", choices=("utf-8", "utf-8-sig", "cp1252", "latin-1"), default="utf-8", help="Input CSV text encoding; output encoding remains UTF-8")
+    parser.add_argument("--max-input-bytes", type=int, help="Snapshot and bound each decompressed CSV input (1..67108864 bytes)")
+    parser.add_argument("--expect-input-sha256", help="Require the main CSV input to match this SHA-256 of decompressed bytes")
     args = parser.parse_args(argv)
+    if args.max_input_bytes is not None and not 1 <= args.max_input_bytes <= 64 * 1024 * 1024:
+        parser.error("--max-input-bytes must be from 1 to 67108864")
     if args.max_clusters is not None and (not args.auto_clusters or not 2 <= args.max_clusters <= 10):
         parser.error("--max-clusters requires --auto-clusters and a value from 2 to 10")
     if args.max_input_rows is not None and not 1 <= args.max_input_rows <= 10_000_000:
@@ -429,6 +498,12 @@ def main(argv=None):
         options["id_column"] = args.id_column
     if args.random_state != 42:
         options["random_state"] = args.random_state
+    if args.encoding != "utf-8":
+        options["encoding"] = args.encoding
+    if args.max_input_bytes is not None:
+        options["max_bytes"] = args.max_input_bytes
+    if args.expect_input_sha256 is not None:
+        options["expected_sha256"] = args.expect_input_sha256
     if args.max_input_rows is not None:
         options["max_rows"] = args.max_input_rows
     if delimiter != ",":
